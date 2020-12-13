@@ -17,6 +17,7 @@
     "escpos": "^2.5.2",
     "escpos-console": "^3.0.0-alpha.2",
     "express": "^4.17.1",
+    "fcm-node": "^1.5.2",
     "fs": "0.0.1-security",
     "http": "0.0.1-security",
     "https": "^1.0.0",

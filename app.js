@@ -39,6 +39,10 @@ let credentials = {
   ca: ca
 };
 
+var FCM = require('fcm-node');
+var serverKey = 'AAAAP6AQ0Yk:APA91bEZldRU5ToIrof_JO4c5T1XAbgkXy4dSrdpWZm7HyFqhgT98Ls2TlE2PsXq8WZ44GaAz0oseAtSI1RlJPAqpKXgowdfCkJnu2tXW1m_DFw2qzybbc-q3oqsVjk7m7xxRth6RoR6'; //put your server key here
+var fcm = new FCM(serverKey);
+
 app.set('views', __dirname + '/views');
 app.set('view engine', 'ejs');
 app.engine('html', require('ejs').renderFile);
@@ -52,6 +56,13 @@ const db = mysql.createConnection({
   user     : process.env.DB_USERNAME,
   password : process.env.DB_PASSWORD,
   database : process.env.DB_DATABASE
+});
+
+db.query("set time_zone='+9:00'", function (err, result) {
+  if (err) {
+    console.log("[mysql] Timezone (" + err + ")");
+    process.exit();
+  }
 });
 
 const logger = winston.createLogger({
@@ -104,8 +115,19 @@ function escpInsert (email, pf, tf, obj) {
   });
 }
 
+function userInsert (email, pwd) {
+  var sql = "INSERT INTO users (email, passwd, fcmkey, ts) " + "values('" + email + "', '" + pwd + "', ''" + ", FROM_UNIXTIME(" + moment().unix() + "))";
+  db.query(sql, function (err, result) {
+    if (err) console.error("[mysql] Insert (" + err + ") : " + sql);
+  });
+}
 
-
+function userUpdate (email, fcmkey) {
+  var sql = "UPDATE users SET fcmkey = '" + fcmkey + "' WHERE email = '" + email + "'";
+  db.query(sql, function (err, result) {
+    if (err) console.error("[mysql] Insert (" + err + ") : " + sql);
+  });
+}
 
 //////////////////////////////////////////////////////////////////////////////////
 //
@@ -173,10 +195,55 @@ function escp (data) {
    return  iconv.decode(Buffer.from(buf), 'euc-kr').toUpperCase();
 }
 
+function fcmMessage (To, Url) {
+  var message = { 
+    to: To,
+    notification: {
+      title: '전지영수증이 발급되었습니다.', 
+      body: '---' 
+    },
+    data: {
+      receipt: Url
+    }
+  };
+  fcm.send(message, function(err, response){
+    if (err) {
+      console.log("Something has gone wrong!");
+    } else {
+      console.log("Successfully sent with response: ", response);
+    }
+  });
+}
+
 ////////////////////////////////////////////////////////
 //
 // method
 //
+
+app.post('/sign-in/', function(req, res) {
+  console.log(req.body);
+  var id     = req.body.id;
+  var pwd    = req.body.pwd;
+  var key    = req.body.key;
+
+  userUpdate (id, key);
+  var result = {};
+  result.code = 200;
+  res.contentType('application/json');
+  res.send(JSON.stringify(result));
+});
+
+app.post('/sign-up/', function(req, res) {
+  console.log(req.body);
+  var id     = req.body.id;
+  var pwd    = req.body.pwd;
+
+  userInsert (id, pwd);
+  var result = {};
+  result.code = 200;
+  res.contentType('application/json');
+  res.send(JSON.stringify(result));
+});
 
 app.post('/receipt/:code', function(req, res) {
   var code    = req.params.code;
@@ -216,6 +283,9 @@ app.post('/receipt/:code', function(req, res) {
   device.open(function(error) {
     printer.buffer.write(Buffer.from(req.body.Data, 'hex'));
   });
+
+  console.log(pf);
+  fcmMessage('fKDDL8wpFKo:APA91bEZ0YVAnjLwVwjp2jsBKhJeE1h4mg2RBbexhC9r1ur6ZAt7Yf1ETU_OzMyQ9dn__jinSYrn8zbEhdJFe39qSnTXkTEYxW_b7YlL-YqqZ3ucA0C3-_yFKgdbXfhweDXoJa56MKAs', 'https://tric.kr/'+ pf);
   res.send(Buffer.from(printer.buffer._buffer).toString('hex'));
 });
 
@@ -225,6 +295,13 @@ app.get('/qrcode/:uuid', function(req, res){
   mycache.set(code.toString(), uuid, TTL);
 
   res.send('uuid: ' + uuid + '<br>' + 'code: ' + code);
+})
+
+app.get('/pdf/:file', function(req, res){
+  var file = req.params.file;
+  var data =fs.readFileSync('./pdf/' + file);
+  res.contentType("application/pdf");
+  res.send(data);
 })
 
 app.get('/qrtest/:code', function(req, res){

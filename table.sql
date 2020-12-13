@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS users (
   id             int NOT NULL AUTO_INCREMENT PRIMARY KEY,
   email          varchar(64) NOT NULL UNIQUE, -- 이메일
   passwd         varchar(64) NOT NULL,        -- 패스워드
+  fcmkey         varchar(256) ,                -- 키값
   ts             timestamp NOT NULL           -- 사용자등록시간
 );
 
