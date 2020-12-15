@@ -40,7 +40,7 @@ let credentials = {
 };
 
 var FCM = require('fcm-node');
-var serverKey = 'AAAAP6AQ0Yk:APA91bEZldRU5ToIrof_JO4c5T1XAbgkXy4dSrdpWZm7HyFqhgT98Ls2TlE2PsXq8WZ44GaAz0oseAtSI1RlJPAqpKXgowdfCkJnu2tXW1m_DFw2qzybbc-q3oqsVjk7m7xxRth6RoR6'; //put your server key here
+var serverKey = process.env.FIREBASE_SERVER_KEY; //put your server key here
 var fcm = new FCM(serverKey);
 
 app.set('views', __dirname + '/views');
@@ -50,6 +50,28 @@ app.engine('html', require('ejs').renderFile);
 app.use(express.json());
 app.use(express.urlencoded({ extended: true}));
 app.use(express.static(__dirname + '/public'));
+
+/////////////////////////////////////////////////////////////////////////
+//
+// middleware
+//
+app.use(function (req, res, next) {
+  req.timestamp  = moment().unix();
+  req.receivedAt = moment().tz('Asia/Seoul').format('YYYY-MM-DD hh:mm:ss');
+  // https://luckyyowu.tistory.com/346
+  console.log(req.receivedAt + ': ', req.method, req.protocol +'://' + req.hostname + req.url);
+  switch(req.method) {
+  case "GET":
+    console.log(req.receivedAt + ': ', req.params);
+    break;
+  case "POST":
+    console.log(req.receivedAt + ': ', req.body);
+    break;
+  }
+  return next();
+});
+
+/////////////////////////////////////////////////////////////////////////
 
 const db = mysql.createConnection({
   host     : process.env.DB_HOSTNAME,
@@ -110,20 +132,6 @@ function toNumber (s) {
 
 function escpInsert (email, pf, tf, obj) {
   var sql = "INSERT INTO receipt (email, name, register, tel, address, text, pdf, total, cash, card, ts) " + "values('" + email + "', '" + obj.name + "', " + "'" + obj.register + "', '" + obj.tel + "', '" + obj.address + "', '" + tf + "', '" + pf + "', " + toNumber(obj.total) + ", " + toNumber(obj.cash) + ", " + toNumber(obj.card) + ", FROM_UNIXTIME(" + moment(obj.date)/1000 + "))";
-  db.query(sql, function (err, result) {
-    if (err) console.error("[mysql] Insert (" + err + ") : " + sql);
-  });
-}
-
-function userInsert (email, pwd) {
-  var sql = "INSERT INTO users (email, passwd, fcmkey, ts) " + "values('" + email + "', '" + pwd + "', ''" + ", FROM_UNIXTIME(" + moment().unix() + "))";
-  db.query(sql, function (err, result) {
-    if (err) console.error("[mysql] Insert (" + err + ") : " + sql);
-  });
-}
-
-function userUpdate (email, fcmkey) {
-  var sql = "UPDATE users SET fcmkey = '" + fcmkey + "' WHERE email = '" + email + "'";
   db.query(sql, function (err, result) {
     if (err) console.error("[mysql] Insert (" + err + ") : " + sql);
   });
@@ -215,38 +223,70 @@ function fcmMessage (To, Url) {
   });
 }
 
-////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////
 //
-// method
+// SIGN-IN (LOG-IN), SIGN-UP
 //
 
 app.post('/sign-in/', function(req, res) {
-  console.log(req.body);
-  var id     = req.body.id;
-  var pwd    = req.body.pwd;
-  var key    = req.body.key;
+  var id      = req.body.id;
+  var pwd     = req.body.pwd;
+  var key     = req.body.key;
+  var code    = 200;
+  var message = "OK";
 
-  userUpdate (id, key);
-  var result = {};
-  result.code = 200;
-  res.contentType('application/json');
-  res.send(JSON.stringify(result));
+  var sql = "UPDATE users SET fcmkey = '" + key + "' WHERE email = '" + id + "' AND passwd = '" + pwd + "'";
+  console.log (sql);
+
+  db.query(sql, function (err, result) {
+    if (result.affectedRows < 1) {
+      code = 204; // no content (user)
+      message = "User/ Password not found!";
+    }
+    if (err) {
+      console.error("[mysql] Insert (" + err + ") : " + sql);
+      code = 500;
+      message = err.sqlMessage;
+    }
+    var result = {};
+    result.code    = code;
+    result.message = message;
+    res.contentType('application/json');
+    console.log(JSON.stringify(result));
+    res.send(JSON.stringify(result));
+  });
 });
 
 app.post('/sign-up/', function(req, res) {
-  console.log(req.body);
   var id     = req.body.id;
   var pwd    = req.body.pwd;
+  var code   = 200;
+  var message = "OK";
 
-  userInsert (id, pwd);
-  var result = {};
-  result.code = 200;
-  res.contentType('application/json');
-  res.send(JSON.stringify(result));
+  var sql = "INSERT INTO users (email, passwd, fcmkey, ts) " + "values('" + id + "', '" + pwd + "', ''" + ", FROM_UNIXTIME(" + moment().unix() + "))";
+  console.log (sql);
+  db.query(sql, function (err, result) {
+    if (err) { 
+      console.error("[mysql] Insert (" + err + ") : " + sql);
+      code = 500;
+      message = err.sqlMessage;
+    }
+    var result = {};
+    result.code    = code;
+    result.message = message;
+    res.contentType('application/json');
+    console.log(JSON.stringify(result));
+    res.send(JSON.stringify(result));
+  });
 });
 
-app.post('/receipt/:code', function(req, res) {
-  var code    = req.params.code;
+///////////////////////////////////////////////////////////////
+//
+// RECEIPT
+//
+
+app.post('/receipt/:license', function(req, res) {
+  var license = req.params.license;
   var device  = new escpos.Console();
   var printer = escpos.Printer(device);
 
@@ -285,17 +325,71 @@ app.post('/receipt/:code', function(req, res) {
   });
 
   console.log(pf);
-  fcmMessage('fKDDL8wpFKo:APA91bEZ0YVAnjLwVwjp2jsBKhJeE1h4mg2RBbexhC9r1ur6ZAt7Yf1ETU_OzMyQ9dn__jinSYrn8zbEhdJFe39qSnTXkTEYxW_b7YlL-YqqZ3ucA0C3-_yFKgdbXfhweDXoJa56MKAs', 'https://tric.kr/'+ pf);
-  res.send(Buffer.from(printer.buffer._buffer).toString('hex'));
+
+  //////////////////////////////////////////////////////////
+  //
+  // FCM (Firebase Cloud Messaging)
+  //
+  var value   = mycache.get(license.toString());
+  if(value != undefined) {
+    var sql = "SELECT * FROM users WHERE email = '" + value + "'";
+    console.log(sql);
+    db.query(sql, function (err, result) {
+      if (err) {
+        console.error("[mysql] Insert (" + err + ") : " + sql);
+        res.send("");
+      }
+      else {
+        console.log(result);
+        console.log(result[0]['fcmkey']);
+        fcmMessage(result[0]['fcmkey'], 'https://tric.kr/'+ pf);
+        res.send(Buffer.from(printer.buffer._buffer).toString('hex'));
+      }
+    });
+  }
+  res.send("");
 });
 
-app.get('/qrcode/:uuid', function(req, res){
-  var uuid = req.params.uuid;
-  var code = rand.generateDigits(10);
-  mycache.set(code.toString(), uuid, TTL);
+app.get('/qrcode/:id', function(req, res){
+  var id     = req.params.id;
+  var qrcode = rand.generateDigits(10);
+  var code    = 200;
+  var message = "OK";
+  mycache.set(qrcode.toString(), id, TTL);
 
-  res.send('uuid: ' + uuid + '<br>' + 'code: ' + code);
+  var result = {};
+  result.code    = code;
+  result.message = message;
+  result.id      = id;
+  result.qrcode  = qrcode;
+  res.contentType('application/json');
+  console.log(JSON.stringify(result));
+  res.send(JSON.stringify(result));
 })
+
+app.get('/qrcode/json/:license/:qrcode', function(req, res){
+  var license = req.params.license;
+  var qrcode  = req.params.qrcode;
+  var value   = mycache.get(qrcode.toString());
+  var code    = 200;
+  var message = "OK";
+
+  if(value == undefined) {
+    code = 204;
+    message = "Invalid QR code";
+  }
+  else {
+    mycache.set(license.toString(), value, TTL);
+  }
+
+  var result = {};
+  result.code    = code;
+  result.message = message;
+  res.contentType('application/json');
+  console.log(JSON.stringify(result));
+  res.send(JSON.stringify(result));
+})
+
 
 app.get('/pdf/:file', function(req, res){
   var file = req.params.file;
@@ -311,8 +405,9 @@ app.get('/qrtest/:code', function(req, res){
   res.send('code: ' + code + '<br>' + 'value: ' + value);
 })
 
-app.get('/qrscan', function(req, res){
-  res.render('qrscan');
+app.get('/qrscan/:license', function(req, res){
+  var license = req.params.license;
+  res.render('qrscan', {license: license});
 });
 
 ////////////////////////////////////////////////////////

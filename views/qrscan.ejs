@@ -1,8 +1,9 @@
 <html>
 <head>
   <meta charset="utf-8">
-  <title>jsQR Demo</title>
+  <title>QR scanner / hancom</title>
   <script src="/js/jsQR.js"></script>
+  <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
   <link href="https://fonts.googleapis.com/css?family=Ropa+Sans" rel="stylesheet">
   <style>
     body {
@@ -53,9 +54,7 @@
   </style>
 </head>
 <body>
-  <h1>jsQR Demo</h1>
-  <a id="githubLink" href="https://github.com/cozmo/jsQR">View documentation on Github</a>
-  <p>Pure JavaScript QR code decoding library.</p>
+  <h1>QR scanner / hancom</h1>
   <div id="loadingMessage">🎥 Unable to access video stream (please make sure you have a webcam enabled)</div>
   <canvas id="canvas" hidden></canvas>
   <div id="output" hidden>
@@ -72,6 +71,20 @@
     var outputData      = document.getElementById("outputData");
 
     var qrcodes = [];
+
+    function readConfFile(file) {
+      var rawFile = new XMLHttpRequest();
+      rawFile.open("GET", file, false);
+      rawFile.onreadystatechange = function () {
+        if(rawFile.readyState === 4) {
+          if(rawFile.status === 200 || rawFile.status == 0) {
+            var allText = rawFile.responseText;
+            alert(allText);
+          }
+        }
+      }
+      rawFile.send(null);
+    }
 
     function drawLine(begin, end, color) {
       canvas.beginPath();
@@ -95,7 +108,13 @@
       video.play();
       requestAnimationFrame(tick);
     });
-
+    function wait(ms){
+       var start = new Date().getTime();
+       var end = start;
+       while(end < start + ms) {
+         end = new Date().getTime();
+      }
+    }
     function tick() {
       loadingMessage.innerText = "⌛ Loading video..."
       if (video.readyState === video.HAVE_ENOUGH_DATA) {
@@ -120,7 +139,16 @@
           }
           outputMessage.hidden = true;
           outputData.parentElement.hidden = false;
+          console.log(code);
           outputData.innerText = code.data;
+
+          ////////////////////////////////////////////////////////////////////////////////////////////
+          // hyhwang
+          var license = <%= license %>;
+          console.log(license);
+          $.getJSON( "/qrcode/json/" + license + "/" + code.data, function( data ) {
+            wait (2000);
+          });
         } else {
           outputMessage.hidden = false;
           outputData.parentElement.hidden = true;
